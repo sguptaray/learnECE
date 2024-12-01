@@ -128,7 +128,7 @@ def train(model, training_data, validation_data, test_data, optimizer, scheduler
         
         train_ll_list +=[train_ll]
         
-        print('  - (Training)     loglikelihood: {ll: 8.4f} ,'
+        print('  - (Training)                loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
               .format( ll=train_ll, elapse=(time.time() - start) / 60))
         
@@ -137,18 +137,18 @@ def train(model, training_data, validation_data, test_data, optimizer, scheduler
         
         valid_ll = eval_epoch(model, validation_data, opt, event_interest )
         valid_ll_list += [valid_ll]
-        print('  - (validation)  loglikelihood: {ll: 8.4f}'
+        print('  - (Validation)              loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
               .format( ll= valid_ll, elapse=(time.time() - start) / 60))
 
         start = time.time()
         
         test_ll = eval_epoch(model, test_data, opt, event_interest )
-        print('  - (test)  loglikelihood: {ll: 8.4f}'
+        print('  - (Test)                    loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
               .format( ll= test_ll, elapse=(time.time() - start) / 60))
         
-        print('  - [Info] Maximum validation loglikelihood:{ll: 8.4f} '
+        print('  - [Info] Maximum validation loglikelihood: {ll: 8.4f} '
               .format(ll = max(valid_ll_list) ))
         
 
