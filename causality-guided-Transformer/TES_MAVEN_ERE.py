@@ -84,7 +84,7 @@ def train_epoch(model, training_data, optimizer, opt):
         
         
         if opt.alpha != 0:
-         # print(loss_cp)
+         
           loss += opt.alpha * p_loss
                 
         """ backward """
@@ -109,7 +109,7 @@ def eval_epoch(model, validation_data, opt, event_interest=None):
                           desc='  - (Validation) ', leave=False):
 
             num_iter +=1
-#             print(num_iter)
+
             """ prepare data """
             _,_, event_type = map(lambda x: x.to(opt.device), batch)
             

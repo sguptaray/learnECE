@@ -15,7 +15,9 @@ import seaborn as sns
 # import Utils
 import transformer.Constants as Constants
 from preprocess.Dataset import get_dataloader
-from transformer.Models_painsumm import Transformer
+from transformer.Models_ll import Transformer
+
+    
 
 
 def prepare_dataloader(opt):
@@ -54,7 +56,7 @@ def train_epoch(model, training_data, optimizer, opt, prior):
 
     model.train()
 
-    pri = torch.flatten(prior).to(opt.device)
+    pri = torch.flatten(prior[opt.event_interest-1]).to(opt.device)
     binpri = torch.stack([1-pri,pri])
     
     num_iter = 0 # number of batches per epoch
@@ -65,23 +67,22 @@ def train_epoch(model, training_data, optimizer, opt, prior):
 
         num_iter += 1
         """ prepare data """
-        event_time,_, event_type = map(lambda x: x.to(opt.device), batch)
+        _,_, event_type = map(lambda x: x.to(opt.device), batch)
         
+        # padded event at time index 0
         event_type_0 = torch.hstack([torch.zeros(event_type.shape[0],1).int().to('cuda'),event_type])
-        
-        event_time_0 = torch.hstack([torch.zeros(event_time.shape[0],1).int().to('cuda'),event_time])
 
         """ forward """
         optimizer.zero_grad()
-
-        output, _, relation = model(event_type_0, event_time_0,  opt.num_samples, opt.decay_rate )
+            
+        output, _, relation = model(event_type_0, opt.num_samples, opt.event_interest, opt.threshold)
         
 
-        rel = torch.flatten(relation) 
+        rel = torch.flatten(relation[opt.event_interest-1]) 
         binrel = torch.stack([1-rel,rel])
         
         """ backward """
-        # negative log-likelihood given influence vector sample
+        # negative log-likelihood given sample influence A
         event_loss_ave = 0
         
         for i in range(len(output)):
@@ -95,13 +96,14 @@ def train_epoch(model, training_data, optimizer, opt, prior):
         kldiv = torch.sum(binrel.T * torch.log(binrel.T +1e-15) - binrel.T *torch.log(binpri.T +1e-15) )
 
 
-        # negative elbo loss
+        # Negative ELBO Loss
         loss =   event_loss_ave + kldiv
         loss.backward()
 
         """ update parameters """
         optimizer.step()
 
+    
 
     return kldiv, -event_loss_ave 
 
@@ -111,7 +113,7 @@ def eval_epoch(model, validation_data, opt, prior):
 
     model.eval()
 
-    pri = torch.flatten(prior) 
+    pri = torch.flatten(prior[opt.event_interest-1]) 
     binpri = torch.stack([1-pri,pri])
     
 
@@ -122,24 +124,22 @@ def eval_epoch(model, validation_data, opt, prior):
                           desc='  - (Validation) ', leave=False):
 
             num_iter +=1
-            
+
             """ prepare data """
-            event_time,_, event_type = map(lambda x: x.to(opt.device), batch)
-
+            _,_, event_type = map(lambda x: x.to(opt.device), batch)
+            
             event_type_0 = torch.hstack([torch.zeros(event_type.shape[0],1).int().to('cuda'),event_type])
-
-            event_time_0 = torch.hstack([torch.zeros(event_time.shape[0],1).int().to('cuda'),event_time])
 
             """ forward """
             
-            output, _, _ = model(event_type_0,event_time_0, opt.num_samples, opt.decay_rate)
+            output, _, _ = model(event_type_0, opt.num_samples, opt.event_interest, opt.threshold)
             
             
             """ compute loss """
             # negative log-likelihood conditioned on influence sample
             event_ll_ave = 0
             for i in range(len(output)):
-                event_ll = log_likelihood(model, output[i,:,:-1,:], event_type)
+                event_ll = log_likelihood_event(model, output[i,:,:-1,:], event_type, opt.event_interest)
                 event_ll_ave += event_ll
             event_ll_ave /= opt.num_samples
             
@@ -147,10 +147,14 @@ def eval_epoch(model, validation_data, opt, prior):
             
 
     return  total_event_ll
-    
 
-def train(model, training_data, validation_data, test_data, optimizer, scheduler, opt, prior):
+
+
+def train(model, training_data, validation_data, test_data, optimizer, scheduler, opt, prior, event_interest,threshold):
     """ Start training. """
+    opt.event_interest = event_interest
+    opt.threshold = threshold
+    print("threshold is {} ; Event interest is {}".format(opt.threshold, opt.event_interest))
     
     best_ll = -np.inf
     best_model = deepcopy(model.state_dict())
@@ -202,7 +206,7 @@ def train(model, training_data, validation_data, test_data, optimizer, scheduler
             best_ll = valid_ll
             best_model = deepcopy(model.state_dict())
             impatient = 0
-        
+          
             
         if impatient >= 5:
             print(f'Breaking due to early stopping at epoch {epoch}')
@@ -230,7 +234,7 @@ def log_likelihood(model, data, types):
     all_scores = F.log_softmax(all_hid,dim=-1)
     types_3d =  F.one_hot(types, num_classes= model.num_types+1)
   
-    ll = (all_scores*types_3d[:,:,1:])
+    ll = (all_scores*types_3d[:,:,1:]) #[:,1:,:]
     
     ll2 = torch.sum(ll,dim=-1)*non_pad_mask
     ll3 = torch.mean(torch.sum(ll2,dim=-1))
@@ -238,65 +242,117 @@ def log_likelihood(model, data, types):
     return ll3
 
 
-parsed_args = argparse.ArgumentParser()
-parsed_args.device = 0
-parsed_args.prior = "prior/MAVEN_ERE/sparse/"
-parsed_args.batch_size = 32
-parsed_args.n_head = 4
-parsed_args.n_layers = 4
-parsed_args.d_model = 64
-parsed_args.d_inner = 128
-parsed_args.d_k=64
-parsed_args.d_v=64
-parsed_args.dropout=0.1
-parsed_args.lr=1e-4
-parsed_args.epoch=10
-parsed_args.num_samples = 1
-parsed_args.decay_rate = 1
-parsed_args.data = "data/MAVEN_ERE/"
 
-opt = parsed_args
+def log_likelihood_event(model, data, types, event_interest):
+    """ Log-likelihood of observing event of interest in the sequence. """
 
 
-# default device is CUDA
-opt.device = torch.device("cuda")
+    non_pad_mask = get_non_pad_mask(types).squeeze(2)
+   
+    all_hid = model.linear(data)
 
-print('[Info] parameters: {}'.format(opt))
+    all_scores = F.softmax(all_hid,dim=-1)
+    all_scores_event = torch.log(all_scores[:,:,event_interest-1] +1e-12)
+    all_scores_nonevent = torch.log(1 - all_scores[:,:,event_interest-1] +1e-12 )
 
-trainloader, devloader, testloader, num_types = prepare_dataloader(opt)
+    event_log_ll = (types == event_interest) * all_scores_event
+    nonevent_log_ll = (types != event_interest) * all_scores_nonevent
+    ll = (event_log_ll + nonevent_log_ll)*non_pad_mask#[:,1:]
+    ll2 = torch.sum(ll)
 
-""" prepare dataloader """
+    return ll2
 
-prior =  load_prior(opt)
 
+def main():
+    """ Main function. """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-data', required=True)
+    parser.add_argument('-prior', required=True)
+                
+    parser.add_argument('-epoch', type=int, default=30)
+    parser.add_argument('-batch_size', type=int, default=16)
+
+    parser.add_argument('-d_model', type=int, default=64)
+    parser.add_argument('-d_inner', type=int, default=128)
+    parser.add_argument('-d_k', type=int, default=16)
+    parser.add_argument('-d_v', type=int, default=16)
+
+    parser.add_argument('-n_head', type=int, default=4)
+    parser.add_argument('-n_layers', type=int, default=4)
+
+    parser.add_argument('-dropout', type=float, default=0.01)
+    parser.add_argument('-lr', type=float, default=1e-4)
+    parser.add_argument('-num_samples', type=int, default=2)
+    parser.add_argument('-event_interest', type=int, default=1)
+    parser.add_argument('-threshold', type=float, default=0.5)
+
+    
+    opt = parser.parse_args()
+
+    # default device is CUDA temporary
+    opt.device = torch.device("cuda")
+
+    print('[Info] parameters: {}'.format(opt))
+
+    np.random.seed(0)
+    torch.manual_seed(0)
+
+    """ prepare dataloader """
+    trainloader, devloader, testloader, num_types = prepare_dataloader(opt)
+    prior =  load_prior(opt)
+
+
+    """ prepare model """
+    model = Transformer(
+        num_types=num_types,
+        d_model=opt.d_model,
+        d_inner=opt.d_inner,
+        n_layers=opt.n_layers,
+        n_head=opt.n_head,
+        d_k=opt.d_k,
+        d_v=opt.d_v,
+        dropout=opt.dropout,
+    )
+    model.to(opt.device)
+
+    """ optimizer and scheduler """
+    optimizer = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()),
+                            opt.lr, betas=(0.9, 0.999), eps=1e-08)
+
+    scheduler = optim.lr_scheduler.StepLR(optimizer, 10, gamma=0.9)
+
+
+    """ number of parameters """
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('[Info] Number of parameters: {}'.format(num_params))
+
+
+    """ train each model @ each threshold """
+    for threshold in [0.4,0.5,0.6]:
+        for event_interest in np.arange(1,num_types+1):
+            
+            best_model = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt, prior , event_interest, threshold)
+
+            model.load_state_dict(best_model)
+
+            model.eval()
+
+            valid_ll = eval_epoch(model, devloader, opt, prior)
+
+            test_ll = eval_epoch(model, testloader, opt, prior)
+            
+
+            print("test log likelihood is {}".format(test_ll))
+
+
+import time
+start = time.time()
 np.random.seed(0)
 torch.manual_seed(0)
 
-""" prepare model """
-model = Transformer(
-    num_types=num_types,
-    d_model=opt.d_model,
-    d_inner=opt.d_inner,
-    n_layers=opt.n_layers,
-    n_head=opt.n_head,
-    d_k=opt.d_k,
-    d_v=opt.d_v,
-    dropout=opt.dropout,
-)
-model.to(opt.device)
+if __name__ == '__main__':
+    main()
+end= time.time()
+print("total training time is {}".format(end-start))
 
-""" optimizer and scheduler """
-optimizer = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()),
-                        opt.lr, betas=(0.9, 0.999), eps=1e-08)
-
-scheduler = optim.lr_scheduler.StepLR(optimizer, 10, gamma=0.9)
-
-
-""" number of parameters """
-num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print('[Info] Number of parameters: {}'.format(num_params))
-
-_ = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt, prior)
-
-
-    

@@ -9,15 +9,13 @@ import torch.nn.functional as F
 from copy import deepcopy
 import sklearn
 import sklearn.metrics
-
-import transformer.Constants as Constants
-
-
-from preprocess.Dataset import get_dataloader
-from transformer.Baseline import Transformer
 from tqdm import tqdm
 import seaborn as sns
-    
+
+# import Utils
+import transformer.Constants as Constants
+from preprocess.Dataset import get_dataloader
+from transformer.Baseline import Transformer
 
 
 def prepare_dataloader(opt):
@@ -41,9 +39,6 @@ def prepare_dataloader(opt):
     devloader = get_dataloader(dev_data, opt.batch_size, shuffle=True)
     testloader = get_dataloader(test_data, opt.batch_size, shuffle=False)
     return trainloader, devloader, testloader, num_types
-
-
-
 
 
 def train_epoch(model, training_data, optimizer, opt):
@@ -94,7 +89,7 @@ def eval_epoch(model, validation_data, opt, event_interest):
                           desc='  - (Validation) ', leave=False):
 
             num_iter +=1
-#             print(num_iter)
+            
             """ prepare data """
             _,_, event_type = map(lambda x: x.to(opt.device), batch)
             
