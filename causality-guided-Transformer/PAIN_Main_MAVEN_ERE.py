@@ -328,22 +328,21 @@ def main():
     print('[Info] Number of parameters: {}'.format(num_params))
 
 
-    """ train each model @ each threshold """
-    for threshold in [0.4,0.5,0.6]:
-        for event_interest in np.arange(1,num_types+1):
+    """ train each model @ specified threshold """
+    if (opt.event_interest >=1) and (opt.event_interest <= num_types):
             
-            best_model = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt, prior , event_interest, threshold)
+        best_model = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt, prior , opt.event_interest, opt.threshold)
 
-            model.load_state_dict(best_model)
+        model.load_state_dict(best_model)
 
-            model.eval()
+        model.eval()
 
-            valid_ll = eval_epoch(model, devloader, opt, prior)
+        valid_ll = eval_epoch(model, devloader, opt, prior)
 
-            test_ll = eval_epoch(model, testloader, opt, prior)
+        test_ll = eval_epoch(model, testloader, opt, prior)
             
 
-            print("test log likelihood is {}".format(test_ll))
+        print("test log likelihood is {}".format(test_ll))
 
 
 import time

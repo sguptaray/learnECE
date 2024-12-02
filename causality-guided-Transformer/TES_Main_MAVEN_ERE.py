@@ -239,6 +239,8 @@ def main():
 
     parser.add_argument('-dropout', type=float, default=0.01)
     parser.add_argument('-lr', type=float, default=1e-4)
+    
+    parser.add_argument('-event_interest', type=int, default=1)
 
     
     opt = parser.parse_args()
@@ -281,18 +283,18 @@ def main():
     print('[Info] Number of parameters: {}'.format(num_params))
 
 
-    """ train each model @ each threshold """
-    for event_interest in np.arange(1,num_types+1):
+    """ train model """
+    if (opt.event_interest >=1) and (opt.event_interest <= num_types):
 
-        best_model = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt,  event_interest)
+        best_model = train(model, trainloader, devloader, testloader, optimizer, scheduler, opt,  opt.event_interest)
 
         model.load_state_dict(best_model)
 
         model.eval()
 
-        valid_ll = eval_epoch(model, devloader, opt, event_interest)
+        valid_ll = eval_epoch(model, devloader, opt, opt.event_interest)
 
-        test_ll = eval_epoch(model, testloader, opt, event_interest)
+        test_ll = eval_epoch(model, testloader, opt, opt.event_interest)
 
 
         print("test log likelihood is {}".format(test_ll))
