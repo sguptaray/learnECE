@@ -173,7 +173,7 @@ def train(model, training_data, validation_data, test_data, optimizer, scheduler
         train_loss_list += [train_event]
         train_ll_list +=[train_ll]
         
-        print('  - (Training)                           KL: {kldiv: 8.4f}, loglikelihood: {ll: 8.4f}, '
+        print('  - (Training)                     KL: {kldiv: 8.4f}, loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
               .format(kldiv=train_event, ll=train_ll, elapse=(time.time() - start) / 60))
         
