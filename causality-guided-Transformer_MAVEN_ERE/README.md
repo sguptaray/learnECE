@@ -29,7 +29,7 @@ This folder holds three CSV files containing the results from training the model
 
 In order to run the models, simply run the python scripts with the necessary flags.
 
-###Running on Google Colab:
+### Running on Google Colab:
 
 Examples:
 
