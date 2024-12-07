@@ -107,72 +107,84 @@ def eval_epoch(model, validation_data, opt, event_interest):
             total_event_ll +=  event_ll
             
 
-    return  total_event_ll 
+    return  total_event_ll
+    
+from sklearn.metrics import f1_score
 
+def compute_f1_score(model, validation_data, opt, event_interest):
+    model.eval()
+    y_true = []
+    y_pred = []
+    
+    with torch.no_grad():
+        for batch in tqdm(validation_data, mininterval=2, desc='  - (F1 Evaluation) ', leave=False):
+            _, _, event_type = map(lambda x: x.to(opt.device), batch)
+            event_type_0 = torch.hstack([torch.zeros(event_type.shape[0], 1).int().to(opt.device), event_type])
+            output, _ = model(event_type_0)
+            predictions = torch.argmax(output[:, :-1, :], dim=-1).cpu().numpy()
+            y_pred.extend(predictions.flatten())
+            y_true.extend(event_type.cpu().numpy().flatten())
+    
+    y_true_filtered = [y for y, p in zip(y_true, y_pred) if y == event_interest or p == event_interest]
+    y_pred_filtered = [p for y, p in zip(y_true, y_pred) if y == event_interest or p == event_interest]
+    y_true, y_pred = y_true_filtered, y_pred_filtered
+
+    f1 = f1_score(y_true, y_pred, average='macro')
+    return f1
 
 def train(model, training_data, validation_data, test_data, optimizer, scheduler, opt, event_interest):
     """ Start training. """
     
     best_ll = -np.inf
     best_model = deepcopy(model.state_dict())
+    best_f1 = 0
 
-    train_ll_list = [] # train log likelihood
-    valid_ll_list = [] # valid log likelihood
+    train_ll_list = []  # train log likelihood
+    valid_ll_list = []  # valid log likelihood
     impatience = 0 
+    
     for epoch_i in range(opt.epoch):
         epoch = epoch_i + 1
         print('[ Epoch', epoch, ']')
 
         start = time.time()
-        train_ll = train_epoch(model, training_data, optimizer, opt )
-        
-        train_ll_list +=[train_ll]
+        train_ll = train_epoch(model, training_data, optimizer, opt)
+        train_ll_list.append(train_ll)
         
         print('  - (Training)                loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
-              .format( ll=train_ll, elapse=(time.time() - start) / 60))
+              .format(ll=train_ll, elapse=(time.time() - start) / 60))
         
-    
         start = time.time()
+        valid_ll = eval_epoch(model, validation_data, opt, event_interest)
+        valid_ll_list.append(valid_ll)
         
-        valid_ll = eval_epoch(model, validation_data, opt, event_interest )
-        valid_ll_list += [valid_ll]
         print('  - (Validation)              loglikelihood: {ll: 8.4f}, '
               'elapse: {elapse:3.3f} min'
-              .format( ll= valid_ll, elapse=(time.time() - start) / 60))
+              .format(ll=valid_ll, elapse=(time.time() - start) / 60))
 
         start = time.time()
-        
-        test_ll = eval_epoch(model, test_data, opt, event_interest )
-        print('  - (Test)                    loglikelihood: {ll: 8.4f}, '
+        valid_f1 = compute_f1_score(model, validation_data, opt, event_interest)
+        print('  - (Validation)              F1 Score: {f1: 8.4f}, '
               'elapse: {elapse:3.3f} min'
-              .format( ll= test_ll, elapse=(time.time() - start) / 60))
-        
-        print('  - [Info] Maximum validation loglikelihood: {ll: 8.4f} '
-              .format(ll = max(valid_ll_list) ))
-        
+              .format(f1=valid_f1, elapse=(time.time() - start) / 60))
 
-        if (valid_ll- best_ll ) < 1e-4:
-            impatient += 1
-            if best_ll < valid_ll:
-                best_ll = valid_ll
-                best_model = deepcopy(model.state_dict())
-        else:
-            best_ll = valid_ll
+        if valid_ll > best_ll or valid_f1 > best_f1:
+            best_ll = max(best_ll, valid_ll)
+            best_f1 = max(best_f1, valid_f1)
             best_model = deepcopy(model.state_dict())
-            impatient = 0
+            impatience = 0
+        else:
+            impatience += 1
         
-            
-        if impatient >= 5:
+        if impatience >= 5:
             print(f'Breaking due to early stopping at epoch {epoch}')
             break
-    
 
-        
         scheduler.step()
     
-
     return best_model
+
         
 def get_non_pad_mask(seq):
     """ Get the non-padding positions. """
